@@ -9,14 +9,17 @@ import sys
 
 import cv2
 from cv2.typing import MatLike
-import numpy as np
+
 
 import Gartic
 from Gartic import Point
 
 
 def shutdown() -> None:
-    cv2.imwrite("evolution.png", best_img)
+    if args.use_gpu:
+        cv2.imwrite("evolution.png", np.asnumpy(best_img)) # type: ignore
+    else:
+        cv2.imwrite("evolution.png", best_img)
     if args.output == "":
         args.output = os.path.splitext(os.path.basename(args.input))[0] + ".gar"
     with open(args.output, "wb") as file:
@@ -55,8 +58,18 @@ parser.add_argument(
     help="Vertical resolution of image to work with. Smaller is faster and takes less memory, larger is more detailed",
     default=200,
 )
+parser.add_argument(
+    "--use-gpu",
+    action="store_true",
+    help="Use CUDA and GPU acceleration instead of CPU",
+)
 
 args = parser.parse_args()
+
+if args.use_gpu:
+    import cupy as np
+else:
+    import numpy as np
 
 start_time = time.time()
 
@@ -238,7 +251,10 @@ for j in range(args.count):
         evolved.add_shape(best_shape)
 
     if (j + 1) % 25 == 0:
-        cv2.imwrite("evolution.png", best_img)
+        if args.use_gpu:
+            cv2.imwrite("evolution.png", np.asnumpy(best_img)) # type: ignore
+        else:
+            cv2.imwrite("evolution.png", best_img)
 
 print()
 shutdown()
