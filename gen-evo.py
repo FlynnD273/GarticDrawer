@@ -17,6 +17,7 @@ from Gartic import Point
 
 executor = None
 
+
 def shutdown() -> None:
     global executor
     if executor:
@@ -29,6 +30,7 @@ def shutdown() -> None:
         f"--- total time - {datetime.timedelta(seconds=math.floor(time.time() - start_time))} ---"
     )
     sys.exit(0)
+
 
 signal.signal(signal.SIGINT, lambda _, b: shutdown())
 
@@ -58,14 +60,28 @@ parser.add_argument(
     default=200,
 )
 parser.add_argument(
-    "-t", "--threads", type=int, help="Number of threads to use for batch processing", default=4
+    "-t",
+    "--threads",
+    type=int,
+    help="Number of threads to use for batch processing",
+    default=4,
+)
+parser.add_argument(
+    "--tiling",
+    type=str,
+    help="Number of tiles to split image into while processing. Default is 1x1",
+    default="1x1",
 )
 
 args = parser.parse_args()
 if args.output == "":
     args.output = os.path.splitext(os.path.basename(args.input))[0] + ".gar"
+split = args.tiling.split("x")
+args.tilex = int(split[0])
+args.tiley = int(split[1])
 
 start_time = time.time()
+
 
 # From https://stackoverflow.com/questions/56472024/how-to-change-the-opacity-of-boxes-cv2-rectangle
 def draw_shape(img: MatLike, shape: Gartic.ToolShape) -> None:
@@ -176,15 +192,16 @@ img = cv2.resize(
     (math.floor(img_width * img_scale), math.floor(img_height * img_scale)),
     interpolation=cv2.INTER_LANCZOS4,
 )
-img_width, img_height = img.shape[:2]
+img_height, img_width = img.shape[:2]
 
 avg_col = cv2.mean(img)
 avg_col = [int(i) for i in avg_col]
 bg_color = get_closest_color((avg_col[0], avg_col[1], avg_col[2]), Gartic.colors)
 
-best_img = np.zeros((img_width, img_height, 3), np.uint8)
+best_img = np.zeros((img_height, img_width, 3), np.uint8)
 best_img[::] = Gartic.colors[bg_color]
 evolved = Gartic.Image(img_width, img_height)
+
 evolved.add_shape(
     Gartic.ToolShape(
         bg_color,
@@ -220,15 +237,20 @@ def process_batch(
     return (best_batch, best_shape)
 
 
-def threaded_batch_processing(original_img: MatLike, evo_img: MatLike, num_threads: int):
+def threaded_batch_processing(
+    original_img: MatLike, evo_img: MatLike, num_threads: int
+):
     if num_threads == 1:
         return process_batch(original_img, evo_img)
 
     global executor
     executor = ThreadPoolExecutor(max_workers=num_threads)
 
-    futures = [executor.submit(process_batch, original_img, evo_img) for _ in range(num_threads)]
-    best_diff = float('inf')
+    futures = [
+        executor.submit(process_batch, original_img, evo_img)
+        for _ in range(num_threads)
+    ]
+    best_diff = float("inf")
     best_batch = evo_img.copy()
     best_shape = None
 
@@ -244,33 +266,53 @@ def threaded_batch_processing(original_img: MatLike, evo_img: MatLike, num_threa
 
 
 avg_step_time = 0
-for j in range(args.count):
-    avg_step_time = (time.time() - start_time) / (j + 1)
+int_tile_width = int(img_width / args.tilex)
+int_tile_height = int(img_height / args.tiley)
+tile_width: float = img_width / args.tilex
+tile_height: float = img_height / args.tiley
 
-    if j == (args.count / 10):
-        print(
-            f"\rEstimated total time - {datetime.timedelta(seconds=math.floor(avg_step_time * args.count))}"
-            + " " * 50
-        )
+obj_index = 1
+print(img_width, img_height)
+for x in range(args.tilex):
+    for y in range(args.tiley):
+        cropped_img = img[
+            y * int_tile_height : (y + 1) * int_tile_height,
+            x * int_tile_width : (x + 1) * int_tile_width,
+        ]
+        best_img = np.zeros((int_tile_height, int_tile_width, 3), np.uint8)
+        best_img[::] = Gartic.colors[bg_color]
+        offset = Point(img_width * (x / args.tilex), img_height * (y / args.tiley))
 
-    time_left = avg_step_time * (args.count - j)
-    print(
-        f"\r({len(evolved.shapes)}) {j + 1}/{args.count} Estimated time left - {datetime.timedelta(seconds=math.floor(time_left))}"
-        + " " * 10,
-        end="",
-    )
+        for j in range(int(args.count / (args.tilex * args.tiley))):
+            avg_step_time = (time.time() - start_time) / (obj_index + 1)
 
-    best_batch, best_shape = threaded_batch_processing(img, best_img, args.threads)
+            if obj_index == (args.count / 10):
+                print(
+                    f"\rEstimated total time - {datetime.timedelta(seconds=math.floor(avg_step_time * args.count))}"
+                    + " " * 50
+                )
 
-    if best_shape is not None:
-        best_img = best_batch.copy()
-        evolved.add_shape(best_shape)
+            time_left = avg_step_time * (args.count - obj_index)
+            print(
+                f"\r({len(evolved.shapes)}) {obj_index}/{args.count} Estimated time left - {datetime.timedelta(seconds=math.floor(time_left))}"
+                + " " * 10,
+                end="",
+            )
 
-    if (j + 1) % 25 == 0:
-        cv2.imwrite(args.output + ".png", best_img)
-        with open(args.output, "wb") as file:
-            pickle.dump(evolved, file)
+            best_batch, best_shape = threaded_batch_processing(
+                cropped_img, best_img, args.threads
+            )
+
+            if best_shape is not None:
+                best_img = best_batch.copy()
+                evolved.add_shape(best_shape + offset)
+
+            if (j + 1) % 25 == 0:
+                cv2.imwrite(args.output + ".png", best_img)
+                with open(args.output, "wb") as file:
+                    pickle.dump(evolved, file)
+
+            obj_index += 1
 
 print()
 shutdown()
-

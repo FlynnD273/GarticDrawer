@@ -118,6 +118,16 @@ class ToolShape(Shape):
             self.tool,
         )
 
+    def __add__(self, b):
+        return ToolShape(
+            self.colorIndex,
+            self.thicknessIndex,
+            self.opacityIndex,
+            self.a + b,
+            self.b + b,
+            self.tool,
+        )
+
     @staticmethod
     def random(w: int, h: int):
         a = Point(random.random() * (w - 1), random.random() * (h - 1))
@@ -139,7 +149,7 @@ class Image:
     height: float
     width: float
 
-    def __init__(self, height: float, width: float):
+    def __init__(self, width: float, height: float):
         self.shapes = []
         self.height = height
         self.width = width
