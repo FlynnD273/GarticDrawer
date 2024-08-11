@@ -5,6 +5,7 @@ import pickle
 import time
 import os
 import signal
+from random import random
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
 import cv2
@@ -128,8 +129,10 @@ evolved.add_shape(
 
 
 def process_batch(
-    original_img: MatLike, evo_img: MatLike, roi_start: Point, roi_end: Point
+    original_img: MatLike, evo_img: MatLike, size:Point
 ) -> tuple[MatLike, None | Gartic.ToolShape]:
+    roi_size = Point(size.x, size.y)
+    roi_start = Point((img_width - size.x) * random(), (img_height - size.y) * random())
     best_shape: None | Gartic.Shape = None
     best_batch = evo_img.copy()
     best_diff = imgdiff(original_img, evo_img)
@@ -137,7 +140,6 @@ def process_batch(
 
     for _ in range(int(args.batch_size / args.threads)):
         test_batch: MatLike = evo_img.copy()
-        roi_size = roi_end - roi_start
         test_shape = Gartic.ToolShape.random(roi_size.x, roi_size.y)
         test_shape.a = test_shape.a + roi_start
         test_shape.b = test_shape.b + roi_start
@@ -159,17 +161,16 @@ def process_batch(
 def threaded_batch_processing(
     original_img: MatLike,
     evo_img: MatLike,
-    roi_start: Point,
-    roi_end: Point,
+    size: Point
 ):
     if args.threads == 1:
-        return process_batch(original_img, evo_img, roi_start, roi_end)
+        return process_batch(original_img, evo_img, size)
 
     global executor
     executor = ThreadPoolExecutor(max_workers=args.threads)
 
     futures = [
-        executor.submit(process_batch, original_img, evo_img, roi_start, roi_end)
+        executor.submit(process_batch, original_img, evo_img, size)
         for _ in range(args.threads)
     ]
     best_diff = float("inf")
@@ -209,25 +210,10 @@ while len(evolved.shapes) < args.batch_count:
         end="",
     )
 
-    diff_img = cv2.absdiff(img, best_img).mean(axis=2)
-    diff_img = (
-        255 * (diff_img - np.min(diff_img)) / (np.max(diff_img) - np.min(diff_img))
-    ).astype(np.uint8)
-    diff_img = diff_img.astype(np.uint8)
-    _, binary = cv2.threshold(diff_img, 80, 255, cv2.THRESH_BINARY)
-    contours, _ = cv2.findContours(binary, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+    frac = len(evolved.shapes) / args.batch_count
+    size = Point(img_width * (1 - frac), img_height * (1 - frac))
 
-    roi_start = Point(0, 0)
-    roi_end = Point(img_width, img_height)
-
-    if contours:
-        largest_contour = max(contours, key=cv2.contourArea)
-        x, y, w, h = cv2.boundingRect(largest_contour)
-        if w * h > img_width * img_height * 0.01:
-            roi_start = Point(x, y)
-            roi_end = Point(x + w, y + h)
-
-    best_img, best_shape = threaded_batch_processing(img, best_img, roi_start, roi_end)
+    best_img, best_shape = threaded_batch_processing(img, best_img, size)
 
     if best_shape is not None:
         evolved.add_shape(best_shape)
@@ -235,7 +221,7 @@ while len(evolved.shapes) < args.batch_count:
     if is_shutdown:
         break
 
-    if len(evolved.shapes) > last_write_out + 25:
+    if len(evolved.shapes) > last_write_out + 1:
         last_write_out = len(evolved.shapes)
         cv2.imwrite(args.output + ".png", best_img)
         with open(args.output, "wb") as file:
