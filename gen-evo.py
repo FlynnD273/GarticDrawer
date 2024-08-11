@@ -60,6 +60,11 @@ parser.add_argument(
     help="Number of threads to use for batch processing",
     default=4,
 )
+parser.add_argument(
+    "--reduce-size",
+    action="store_true",
+    help="Reduces max size of shapes as progress increases. May help at lower batch sizes",
+)
 
 args = parser.parse_args()
 if args.output == "":
@@ -210,7 +215,10 @@ while len(evolved.shapes) < args.batch_count:
         end="",
     )
 
-    frac = len(evolved.shapes) / args.batch_count
+    if args.reduce_size:
+        frac = len(evolved.shapes) / args.batch_count
+    else:
+        frac = 0
     size = Point(img_width * (1 - frac), img_height * (1 - frac))
 
     best_img, best_shape = threaded_batch_processing(img, best_img, size)
