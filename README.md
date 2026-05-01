@@ -1,3 +1,5 @@
+# ⚠️ This repository has migrated to [Codeberg](https://codeberg.org/FlynnD273/gartic-drawer)
+
 # GarticDrawer
 Draws an image in Gartic Phone
 
